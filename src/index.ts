@@ -721,68 +721,109 @@ export default {
                     const responseId = `resp_${reqId}`;
                     const messageId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 
-                    // Build Responses API style payload
-                    const responsePayload = {
-                        id: responseId,
-                        object: "response",
-                        created_at: createdAt,
-                        status: "completed",
-                        error: null,
-                        incomplete_details: null,
-                        instructions: null,
-                        max_output_tokens: null,
-                        model: requestedModel,
-                        output: [
-                            {
-                                type: "message",
-                                id: messageId,
-                                status: "completed",
-                                role: "assistant",
-                                content: [
-                                    {
-                                        type: "output_text",
-                                        text: outputContent,
-                                        annotations: [] as any[]
-                                    }
-                                ]
-                            }
-                        ],
-                        parallel_tool_calls: false,
-                        previous_response_id: null,
-                        reasoning: {
-                            effort: null,
-                            summary: null
-                        },
-                        store: false,
-                        temperature: 1.0,
-                        text: {
-                            format: {
-                                type: "text"
-                            }
-                        },
-                        tool_choice: "auto",
-                        tools: [] as any[],
-                        top_p: 1.0,
-                        truncation: "disabled",
-                        usage: {
-                            input_tokens: 0,
-                            input_tokens_details: {
-                                cached_tokens: 0
-                            },
-                            output_tokens: 0,
-                            output_tokens_details: {
-                                reasoning_tokens: 0
-                            },
-                            total_tokens: 0
-                        },
-                        user: null,
-                        metadata: {}
-                    };
+                    // Compatibility switch: default to Chat Completions schema for widest client compatibility (e.g., .NET),
+                    // return Responses API schema only when explicitly requested via headers or query param.
+                    const openaiBetaHeader = request.headers.get('OpenAI-Beta') || '';
+                    const explicitFormatHeader = request.headers.get('x-openai-response-format') || request.headers.get('x-proxy-response-format') || '';
+                    const wantsResponsesApi =
+                        openaiBetaHeader.toLowerCase().includes('responses') ||
+                        explicitFormatHeader.toLowerCase() === 'response' ||
+                        url.searchParams.get('response_format') === 'response';
 
-                    return createCorsResponse(
-                        JSON.stringify(responsePayload),
-                        { headers: { 'Content-Type': 'application/json' } }
-                    );
+                    if (wantsResponsesApi) {
+                        // Build Responses API style payload
+                        const responsePayload = {
+                            id: responseId,
+                            object: "response",
+                            created_at: createdAt,
+                            status: "completed",
+                            error: null,
+                            incomplete_details: null,
+                            instructions: null,
+                            max_output_tokens: null,
+                            model: requestedModel,
+                            output: [
+                                {
+                                    type: "message",
+                                    id: messageId,
+                                    status: "completed",
+                                    role: "assistant",
+                                    content: [
+                                        {
+                                            type: "output_text",
+                                            text: outputContent,
+                                            annotations: [] as any[]
+                                        }
+                                    ]
+                                }
+                            ],
+                            parallel_tool_calls: false,
+                            previous_response_id: null,
+                            reasoning: {
+                                effort: null,
+                                summary: null
+                            },
+                            store: false,
+                            temperature: 1.0,
+                            text: {
+                                format: {
+                                    type: "text"
+                                }
+                            },
+                            tool_choice: "auto",
+                            tools: [] as any[],
+                            top_p: 1.0,
+                            truncation: "disabled",
+                            usage: {
+                                input_tokens: 1,
+                                input_tokens_details: {
+                                    cached_tokens: 1
+                                },
+                                output_tokens: 1,
+                                output_tokens_details: {
+                                    reasoning_tokens: 1
+                                },
+                                total_tokens: 1
+                            },
+                            user: null,
+                            metadata: {}
+                        };
+
+                        return createCorsResponse(
+                            JSON.stringify(responsePayload),
+                            { headers: { 'Content-Type': 'application/json' } }
+                        );
+                    } else {
+                        // Build classic Chat Completions payload (compatible with many SDKs, including .NET clients)
+                        const chatCompletionPayload = {
+                            id: `chatcmpl-${reqId}`,
+                            object: "chat.completion",
+                            created: createdAt,
+                            model: requestedModel,
+                            choices: [
+                                {
+                                    index: 0,
+                                    message: {
+                                        role: "assistant",
+                                        content: outputContent
+                                    },
+                                    finish_reason: "stop",
+                                    logprobs: null
+                                }
+                            ],
+                            usage: {
+                                prompt_tokens: 1,
+                                completion_tokens: 1,
+                                total_tokens: 1
+                            },
+                            system_fingerprint: null
+                        };
+
+                        return createCorsResponse(
+                            JSON.stringify(chatCompletionPayload),
+                            { headers: { 'Content-Type': 'application/json' } }
+                        );
+                    }
                 }
 			} catch (error: any) {
                 // Catch errors from tryFalRequest (e.g., all keys failed) or other processing errors
