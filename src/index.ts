@@ -116,6 +116,8 @@ const FAL_SUPPORTED_MODELS = [
 	"openai/gpt-4o-mini",
 	"openai/gpt-4o",
 	"openai/gpt-5-chat",
+    "openai/gpt-5-mini",
+    "openai/gpt-5-nano",
 	"openai/gpt-o3",
 	"deepseek/deepseek-r1",
 	"meta-llama/llama-4-maverick",
@@ -319,6 +321,30 @@ export function convertMessagesToFalPrompt(messages: OpenAIMessage[]): { system_
 // Type guard to check if a string is a valid FalModelId
 function isValidFalModelId(modelId: string): modelId is FalModelId {
 	return (FAL_SUPPORTED_MODELS as readonly string[]).includes(modelId);
+}
+
+// Resolve a short model alias from path (e.g., "gpt-5-chat" or "claude-3.7-sonnet")
+// to a full Fal model id (e.g., "openai/gpt-5-chat" or "anthropic/claude-3.7-sonnet").
+function resolveFalModelIdFromPathSegment(modelSegment: string): FalModelId | null {
+    if (!modelSegment) return null;
+    const segment = modelSegment.trim();
+
+    // If already namespaced (e.g., openai/gpt-5-chat), validate directly
+    if (segment.includes('/')) {
+        return isValidFalModelId(segment) ? (segment as FalModelId) : null;
+    }
+
+    // Special alias mapping
+    if (segment === 'deepseek-chat') {
+        return isValidFalModelId('openai/gpt-5-chat') ? ('openai/gpt-5-chat' as FalModelId) : null;
+    }
+
+    // Try to match by suffix after '/'
+    const match = (FAL_SUPPORTED_MODELS as readonly string[]).find((full) => {
+        const [, short] = full.split('/');
+        return short === segment;
+    });
+    return match ? (match as FalModelId) : null;
 }
 
 // === CORS Utilities ===
@@ -592,7 +618,7 @@ export default {
             );
 		}
 
-		// --- Routing ---
+        // --- Routing ---
 
 		// GET /v1/models
 		if (method === 'GET' && path === '/v1/models') {
@@ -616,8 +642,13 @@ export default {
 			}
 		}
 
-		// POST /v1/chat/completions
-		if (method === 'POST' && path === '/v1/chat/completions') {
+        // POST /v1/:model/chat/completions OR legacy /v1/chat/completions
+        // If a model is embedded in the path, it overrides the request body model
+        const pathParts = path.split('/').filter(Boolean); // remove empty
+        const isChatCompletions = pathParts.length >= 3 && pathParts[0] === 'v1' && pathParts[pathParts.length - 2] === 'chat' && pathParts[pathParts.length - 1] === 'completions';
+        const legacyChatCompletions = path === '/v1/chat/completions';
+
+        if (method === 'POST' && (isChatCompletions || legacyChatCompletions)) {
 			let requestBody: OpenAIChatCompletionRequest;
 			try {
 				requestBody = await request.json();
@@ -628,7 +659,24 @@ export default {
                 );
 			}
 
-			const { model: requestedModel, messages, stream = false } = requestBody;
+            const { model: bodyModel, messages, stream = false } = requestBody;
+
+            // Path-embedded model handling
+            let requestedModel = bodyModel;
+            if (isChatCompletions && pathParts.length >= 3) {
+                // e.g., /v1/gpt-5-chat/chat/completions
+                const modelSegment = pathParts[1]; // after v1
+                // Accept raw segment like "gpt-5-chat" or namespaced "openai/gpt-5-chat"
+                const resolvedFromPath = resolveFalModelIdFromPathSegment(modelSegment);
+                if (resolvedFromPath) {
+                    // Report original (un-namespaced) model back to client if segment is short
+                    const [, short] = resolvedFromPath.split('/');
+                    requestedModel = short; // keep reporting short name like gpt-5-chat
+                } else {
+                    // If the path model is not recognized, keep body model
+                    console.warn(`Unrecognized model segment in path: ${modelSegment}. Falling back to body model.`);
+                }
+            }
 
 			if (!requestedModel || !messages || !Array.isArray(messages) || messages.length === 0) {
 				return createCorsResponse(
@@ -637,9 +685,17 @@ export default {
                 );
 			}
 
-			// Validate and determine the model to use with alias mapping
-			// Map 'deepseek-chat' -> 'openai/gpt-5-chat' (backend redirection)
-			const resolvedModel = requestedModel === 'deepseek-chat' ? 'openai/gpt-5-chat' : requestedModel;
+            // Validate and determine the model to use with alias mapping
+            // Map 'deepseek-chat' -> 'openai/gpt-5-chat' (backend redirection)
+            // If path embeds model, force use it regardless of body
+            let resolvedModel = requestedModel === 'deepseek-chat' ? 'openai/gpt-5-chat' : requestedModel;
+            if (isChatCompletions && pathParts.length >= 3) {
+                const modelSegment = pathParts[1];
+                const forced = resolveFalModelIdFromPathSegment(modelSegment);
+                if (forced) {
+                    resolvedModel = forced;
+                }
+            }
 			let modelToUse: FalModelId;
 			if (isValidFalModelId(resolvedModel)) {
 				modelToUse = resolvedModel as FalModelId;
