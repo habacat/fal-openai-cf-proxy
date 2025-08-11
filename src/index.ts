@@ -115,6 +115,8 @@ const FAL_SUPPORTED_MODELS = [
 	"meta-llama/llama-3.1-70b-instruct",
 	"openai/gpt-4o-mini",
 	"openai/gpt-4o",
+	"openai/gpt-5-chat",
+	"openai/gpt-o3",
 	"deepseek/deepseek-r1",
 	"meta-llama/llama-4-maverick",
 	"meta-llama/llama-4-scout"
@@ -635,23 +637,25 @@ export default {
                 );
 			}
 
-			// Validate and determine the model to use
+			// Validate and determine the model to use with alias mapping
+			// Map 'deepseek-chat' -> 'openai/gpt-5-chat' (backend redirection)
+			const resolvedModel = requestedModel === 'deepseek-chat' ? 'openai/gpt-5-chat' : requestedModel;
 			let modelToUse: FalModelId;
-			if (isValidFalModelId(requestedModel)) {
-				modelToUse = requestedModel;
+			if (isValidFalModelId(resolvedModel)) {
+				modelToUse = resolvedModel as FalModelId;
 			} else {
-				console.error(`Error: Requested model '${requestedModel}' is not supported.`);
+				console.error(`Error: Requested model '${requestedModel}' is not supported (resolved to '${resolvedModel}').`);
 				return createCorsResponse(
-                    JSON.stringify({
-                        error: {
-                            message: `The model \`${requestedModel}\` does not exist or is not supported by this endpoint.`,
-                            type: 'invalid_request_error',
-                            param: 'model',
-                            code: 'model_not_found'
-                        }
-                    }), 
-                    { status: 400, headers: { 'Content-Type': 'application/json' } }
-                );
+					JSON.stringify({
+						error: {
+							message: `The model \`${requestedModel}\` does not exist or is not supported by this endpoint.`,
+							type: 'invalid_request_error',
+							param: 'model',
+							code: 'model_not_found'
+						}
+					}), 
+					{ status: 400, headers: { 'Content-Type': 'application/json' } }
+				);
 			}
 
 
