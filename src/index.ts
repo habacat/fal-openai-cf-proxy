@@ -709,40 +709,81 @@ export default {
                          throw new Error("Internal server error during stream setup.");
                     }
 
-				} else {
-					// --- Non-Stream Handling ---
+                } else {
+                    // --- Non-Stream Handling ---
                     // tryFalRequest returns the FalSubscribeResult directly if successful
-					const falResult = result as FalSubscribeResult; // Type assertion
+                    const falResult = result as FalSubscribeResult; // Type assertion
 
-					// Log the raw result for debugging (optional)
-					// console.log("Raw non-stream result from fal-ai:", JSON.stringify(falResult, null, 2));
-
-					// Access properties correctly from the data object returned by tryFalRequest
+                    // Access properties correctly from the data object returned by tryFalRequest
                     const outputContent = falResult?.data?.output ?? "";
                     const reqId = falResult?.requestId || Date.now().toString();
+                    const createdAt = Math.floor(Date.now() / 1000);
+                    const responseId = `resp_${reqId}`;
+                    const messageId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 
-					const openAIResponse = {
-						id: `chatcmpl-${reqId}`,
-						object: "chat.completion",
-						created: Math.floor(Date.now() / 1000),
-						model: requestedModel, // Report the originally requested model
-						choices: [{
-							index: 0,
-							message: {
-								role: "assistant",
-								content: outputContent
-							},
-							finish_reason: "stop",
-							logprobs: null
-						}],
-						usage: { prompt_tokens: null, completion_tokens: null, total_tokens: null },
-						system_fingerprint: null,
-					};
-					return createCorsResponse(
-                        JSON.stringify(openAIResponse), 
+                    // Build Responses API style payload
+                    const responsePayload = {
+                        id: responseId,
+                        object: "response",
+                        created_at: createdAt,
+                        status: "completed",
+                        error: null,
+                        incomplete_details: null,
+                        instructions: null,
+                        max_output_tokens: null,
+                        model: requestedModel,
+                        output: [
+                            {
+                                type: "message",
+                                id: messageId,
+                                status: "completed",
+                                role: "assistant",
+                                content: [
+                                    {
+                                        type: "output_text",
+                                        text: outputContent,
+                                        annotations: [] as any[]
+                                    }
+                                ]
+                            }
+                        ],
+                        parallel_tool_calls: false,
+                        previous_response_id: null,
+                        reasoning: {
+                            effort: null,
+                            summary: null
+                        },
+                        store: false,
+                        temperature: 1.0,
+                        text: {
+                            format: {
+                                type: "text"
+                            }
+                        },
+                        tool_choice: "auto",
+                        tools: [] as any[],
+                        top_p: 1.0,
+                        truncation: "disabled",
+                        usage: {
+                            input_tokens: 0,
+                            input_tokens_details: {
+                                cached_tokens: 0
+                            },
+                            output_tokens: 0,
+                            output_tokens_details: {
+                                reasoning_tokens: 0
+                            },
+                            total_tokens: 0
+                        },
+                        user: null,
+                        metadata: {}
+                    };
+
+                    return createCorsResponse(
+                        JSON.stringify(responsePayload),
                         { headers: { 'Content-Type': 'application/json' } }
                     );
-				}
+                }
 			} catch (error: any) {
                 // Catch errors from tryFalRequest (e.g., all keys failed) or other processing errors
 				console.error("Error during Fal request processing or after retries:", error);
